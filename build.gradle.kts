@@ -1,7 +1,8 @@
 plugins {
-    kotlin("jvm") version "1.6.10"
-    kotlin("plugin.jpa") version "1.6.10"
-    java
+  kotlin("jvm") version "1.6.10"
+  kotlin("plugin.jpa") version "1.6.10"
+  kotlin("plugin.allopen") version "1.6.10"
+  java
 }
 
 group = "net.joostory"
@@ -23,4 +24,8 @@ dependencies {
 
 tasks.getByName<Test>("test") {
     useJUnitPlatform()
+}
+
+allOpen {
+  annotation("javax.persistence.Entity")
 }
