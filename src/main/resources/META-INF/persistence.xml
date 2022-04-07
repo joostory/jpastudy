@@ -12,6 +12,7 @@
 		<class>net.joostory.jpastudy.ch06.Order</class>
     <class>net.joostory.jpastudy.ch08.Member</class>
     <class>net.joostory.jpastudy.ch08.Team</class>
+    <class>net.joostory.jpastudy.ch08.Order</class>
     <class>net.joostory.jpastudy.ch08.Member2</class>
     <class>net.joostory.jpastudy.ch08.Team2</class>
 		<properties>
