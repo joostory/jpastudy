@@ -1,6 +1,9 @@
 package net.joostory.jpastudy.ch08;
 
 import javax.persistence.EntityManager;
+import javax.persistence.criteria.CriteriaBuilder;
+import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Root;
 import net.joostory.jpastudy.Entity_managerKt;
 
 public class Main {
@@ -34,6 +37,14 @@ public class Main {
     System.out.println("team=" + em.getEntityManagerFactory().getPersistenceUnitUtil().isLoaded(team));
     System.out.println("team=" + team.getClass().getName());
     member.setTeam(team);
+  }
+
+  private void criteriaTest() {
+    CriteriaBuilder cb = em.getCriteriaBuilder();
+    CriteriaQuery<Member2> query = cb.createQuery(Member2.class);
+    Root<Member2> m = query.from(Member2.class);
+    CriteriaQuery<Member2> cq = query.select(m).where(cb.equal(m.get("username"), "kim"));
+    em.createQuery(cq).getResultList();
   }
 
 
