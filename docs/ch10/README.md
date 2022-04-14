@@ -170,7 +170,7 @@ private fun queryMember(em: EntityManager) {
 }
 
 private fun queryMember2(em: EntityManager) {
-  val query: TypedQuery<Member> = em.createQuery("select m from ch10Member m where m.name = :name", Member::class.java)
+  val query: TypedQuery<Member> = em.createQuery("select m from ch10Member m where m.name = ?1", Member::class.java)
   query.setParameter(1, "kim") // 위치 기준 바인딩
   query.resultList.forEach { member ->
     log("member = ${member.name}")
@@ -611,6 +611,265 @@ em.createNamedQuery("Member.findByUsername", Member::class.java)
 어노테이션보다 XML이 우선
 
 # 10.3 Criteria
+- JPQL을 자바코드로 작성하도록 도와주는 빌더
+- 컴파일 단계에서 문법 오류를 알 수 있다.
+- 개발코드가 복잡하고 장황하다.
+
+## 10.3.1 Criteria 기초
+- javax.persistence.criteria 패키지
+
+```
+CriteriaBuilder cb = em.getCriteriaBuilder(); // EntityManager를 통해서 빌더를 얻을 수 있다.
+CriteriaQuery<Member> cq = cb.createQuery(Member.class); // 쿼리생성시 반환타입을 지정할 수 있다.
+Root<Member> m = cq.from(Member.class); // from 생성
+
+predicate usernameEqual = cb.equal(m.get("username"), "회원1"); // 검색 조건
+javax.persistence.criteria.Order ageDesc = cb.desc(m.get("age")); // 정렬 조건 
+
+cq.select(m) // select 생성
+  .where(usernameEqual) // where 생성
+  .orderBy(ageDesc); // order by 생성
+
+
+TypedQuery<Member> query = em.createQuery(cq);
+List<Member> members = query.getResultList();
+```
+
+## 10.3.2 Criteria 쿼리 생성
+```
+CriteriaQuery<Member> cq = cb.createQuery(Member.class); // 타입 지정
+CriteriaQuery<Object> cq = cb.createQuery(); // 타입 지정하지 않음. 여러 타입에서 사용가능
+CriteriaQuery<Object[]> cq = cb.createQuery(Object[].class);
+CriteriaQuery<Tuple> cq = cb.createTupleQuery(); // 튜플 사용
+```
+
+## 10.3.3 조회
+```
+public interface CriteriaQuery<T> extends AbstractQuery<T> {
+  CriteriaQuery<T> select(Selection<? extends T> selection); // 한건
+  CriteriaQuery<T> multiselect(Selection<?>... selection); // 여러건
+  CriteriaQuery<T> multiselect(List<Selection<? extends T>> selectionList); // 여러건
+}
+```
+
+```
+cq.select(m) // select m
+cq.multiselect(m.get("username"), m.get("age")) // select m.username, m.age
+cq.select(cb.array(m.get("username"), m.get("age"))) // select m.username, m.age
+```
+
+### DISTINCT
+```
+cq.multiselect(m.get("username"), m.get("age"))
+  .distinct(true)
+```
+- select 이후 distinct(true) 사용
+
+### NEW, construct()
+```
+cq.select(cb.construct(MemberCTO.class, m.get("username"), m.get("age")))
+```
+- JPQL의 new 생성자 구문을 criteria에서는 cb.construct(클래스타입) 으로 사용한다.
+
+### 튜플
+```
+cq.multiselect(
+  m.get("username").alias("username"), // tuple에서 사용할 튜플별칭
+  m.get("age").alias("age")
+);
+// multiselect 대신 select(cb.tuple()) 도 사용할 수 있다.
+// cq.select(cb.tuple(
+//   m.alias("m"),
+//   m.get("username").alias("username")
+// ));
+
+TypedQuery<Tuple> query = em.createQuery(cq);
+List<Tuple> resultList = query.getResultList();
+for (Tuple tuple : resultList) {
+  String username = tuple.get("username", String.class); // 튜플별칭으로 조회
+}
+```
+- 튜플은 이름 기반이므로 Object보다 안전하다.
+- 튜플은 별칭을 필수로 주어야 한다.
+
+## 10.3.4 집합
+### GROUP BY
+```
+cq.groupBy(m.get("team").get("name"));
+```
+
+### HAVING
+```
+Expression minAge = cb.min(m.<Integer>get("age"));
+cq.groupBy(m.get("team").get("name"))
+  .having(cb.gt(minAge, 10));
+```
+
+## 10.3.5 정렬
+- cb.desc, cb.asc로 생성할 수 있다.
+
+## 10.3.6 조인
+```
+Join<Member, Team> t = m.join("team", JoinType.INNER); // 내부 조인
+m.fetch("team", JoinType.LEFT); // 페치 조인
+```
+
+## 10.3.7 서브 쿼리
+```
+// select m from Member m where m.age >= (select AVG(m2.age) from Member m2)
+
+CriteriaBuilder cb = em.getCriteriaBuilder();
+CriteriaQuery<Member> mainQuery = cb.createQuery(Member.class);
+
+Subquery<Double> subQuery = mainQuery.subquery(Double.class); // 서브 쿼리 생성
+Root<Member> m2 = subQuery.from(Member.class);
+subQuery.select(cb.avg(m2.<Integer>get("age")));
+
+Root<Member> m = mainQuery.from(Member.class); // 메인 쿼리 생성
+mainQuery.select(m)
+  .where(cb.ge(m.<Integer>get("age"), subQuery));
+```
+
+```
+// select m from Member m where exists(select t from m.team t where t.name='팀A')
+
+CriteriaBuilder cb = em.getCriteriaBuilder();
+CriteriaQuery<Member> mainQuery = cb.createQuery(Member.class);
+Root<Member> m = mainQuery.from(Member.class);
+
+Subquery<Team> subQuery = mainQuery.subquery(Team.class);
+Root<Member> subM = subQuery.correlate(m); // 메인 쿼리의 별칭을 가져옴
+
+Join<Member, Team> t = subM.join("team");
+subQuery.select(t)
+  .where(cb.equal(t.get("name"), "팀A"));
+  
+mainQuery.select(m)
+  .where(cb.exists(subQuery));
+
+List<Member> resultList = em.createQuery(mainQuery).getResultList();
+```
+
+## 10.3.8 IN 식
+```
+.where(cb.in(m.get("username")))
+```
+
+## 10.3.9 CASE 식
+```
+/*
+case when m.age >= 60 then 600
+  when m.age <= 15 then 500
+  else 1000
+end
+*/
+
+cq.multiselect(
+  m.get("username"),
+  cb.selectCase()
+    .when(cb.ge(m.<Integer>get("age"), 60), 600)
+    .when(cb.le(m.<Integer>get("age"), 15), 500)
+    .otherwise(1000)
+);
+```
+
+## 10.3.10 파라미터 정의
+```
+cq.select(m)
+  .where(
+    cq.equal(m.get("username"), cb.parameter(String.classs, "usernameParam"))
+  )
+```
+
+## 10.3.11 네이티브 함수 호출
+네이티브 SQL 함수를 호출하려면 cb.function() 메소드를 사용하면 된다.
+```
+Expression<Long> function = cb.function("SUM", Long.class, m.get("age"));
+cq.select(function);
+```
+
+## 10.3.12 동적 쿼리
+다양한 검색 조건에 따라 쿼리를 생성하는 것.
+```
+List<Predicate> criteria = new ArrayList<Predicate>();
+if (age != null) criteria.add(cb.equal(m.<Integer>get("age"), cb.parameter(Integer.class, "age"));
+
+cb.where(cb.and(criteria.toArray(new Predicate[0])));
+
+if (age != null) query.setParameter("age", age);
+```
+- JPQL로 동적 쿼리를 만들기 위해서는 StringBuilder를 사용하는데 공백이나 where, and 위치 걱정을 하지 않아도 된다. 
+
+## 10.3.13 함수 정리
+| 함수명 | JPQL |
+| --- | --- |
+| isNull() | is null |
+| isNotNull() | is not null |
+| in() | in |
+| and() | and |
+| equal(), notEqual() | =, <> |
+| lt(), lessThan() | < |
+| le(), lessThanOrEqual() | <= |
+| gt(), greaterThan() | > |
+| ge(), greaterThanOrEqual() | >= |
+| ge(), greaterThanOrEqual() | < |
+| exists, not(exists()) | exists, not exists |
+| sum(), neg(), diff(), prod(), quot() | +, -, *, / |
+| avg() | avg |
+| selectCase() | case |
+
+## 10.3.14 Criteria 메타 모델 API
+- m.get("age")에서 'age' 대신 'ageaa'를 사용해도 컴파일 오류가 발생하지 않는다.
+- 메타모델을 사용하면 이를 코드로 작성할 수 있다.
+
+```
+// 적용 전
+cq.select(m)
+  .where(cb.gt(m.<Integer>get("age"), 20))
+  .orderBy(cb.desc(m.get("age")));
+
+// 적용 후
+cq.select(m)
+  .where(cb.gt(m.get(Member_.age), 20))
+  .orderBy(cb.desc(m.get(Member_.age)));
+```
+- Member_ 클래스를 메타모델 클래스라고 한다.
+
+```
+@Generated(value = "org.hibernate.jpamodelgen.JPAMetaModelEntityProcessor")
+@StaticMetamodel(Member.class)
+public abstract class Member_ {
+  public static volatile SingularAttribute<Member, Integer> age;
+}
+```
+- hibernate-jpamodelgen 설정하여 코드를 생성할 수 있다.
+
+
 # 10.4 QueryDSL
+## 10.4.1 QueryDSL 설정
+## 10.4.2 시작
+## 10.4.3 검색 조건 쿼리
+## 10.4.4 결과 조회
+## 10.4.5 페이징과 정렬
+## 10.4.6 그룹
+## 10.4.7 조인
+## 10.4.8 서브 쿼리
+## 10.4.9 프로젝션과 결과 반환
+## 10.4.10 수정, 삭제 배치 쿼리
+## 10.4.11 동적 쿼리
+## 10.4.12 메소드 위임
+## 10.4.13 QueryDSL 정리
+
 # 10.5 네이티브 SQL
+
+## 10.5.1 네이티브 SQL 사용
+## 10.5.2 Named 네이티브 SQL
+## 10.5.3 네이티브 SQL XML에 정의
+## 10.5.4 네이티브 SQL 정리
+## 10.5.5 스토어드 프로시저
+
 # 10.6 객체지향 쿼리 심화
+
+## 10.6.1 벌크 연산
+## 10.6.2 영속성 컨텍스트와 JPQL
+## 10.6.3 JPQL과 플러시 모드
