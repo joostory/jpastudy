@@ -1143,11 +1143,174 @@ fun isHelloStart(stringPath: StringPath): BooleanExpression? {
 - String같은 기본 타입에도 정의할 수 있다.
 
 # 10.5 네이티브 SQL
+- 특정 데이터베이스만 지원하는 함수, 문법, SQL 쿼리 힌트
+  - JPQL 에서 네이티브 SQL 함수 호출
+  - 하이버네이트는 방언에 종속적인 함수들을 정의했다.
+- 인라인 뷰, UNION, INTERSECT
+  - 일부 JPA 구현체들이 지원
+- 스토어드 프로시저
+  - JPQL에서 호출할 수 있다.
+- 특정 데이터베이스만 지원하는 문법
+  - 오라클의 CONNECT BY 같은 문법은 지원하지 않는다. 이때 네이티브 SQL을 사용해야 한다.
+
+네이티브 SQL을 사용하면 엔티티를 조회하고 영속성 컨텍스트의 기능을 그대로 사용할 수 있다.
+
 ## 10.5.1 네이티브 SQL 사용
+### 엔티티 조회
+```kotlin
+  val nativeQuery:Query = em.createNativeQuery("select id, name, age from ch10Member where age > ?", Member::class.java)
+    .setParameter(1, 20)
+  val list: MutableList<Member> = nativeQuery.resultList as MutableList<Member>
+  list.forEach {
+    log("member= ${it.id} ${it.name}")
+  }
+```
+- 네이티브 sql을 사용할 뿐 jpql을 사용할때와 같다.
+- createNativeQuery의 결과가 TypedQuery가 아닌 Query가 리턴되는데 이것은 JPA1.0에서 API 규약이 정의되어 버려서 그렇다.
+
+### 값 조회
+```kotlin
+  val nativeQuery:Query = em.createNativeQuery("select id, name, age from ch10Member where age > ?")
+    .setParameter(1, 20)
+  val list: MutableList<Any?>? = nativeQuery.resultList
+  list?.forEach {
+    val obj = it as Array<*>
+    val id = obj[0] as Int
+    val name = obj[1] as String 
+    log("member= $id $name")
+  }
+```
+- 두번째 파라미터를 사용하지 않고 호출하고 영속성 컨텍스트가 관리하지 않는다.
+
+### 결과 매핑 사용
+```kotlin
+@Entity(name = "ch10Member")
+@SqlResultSetMapping(name = "memberWithOrderCount",
+  entities = [EntityResult(entityClass = Member::class)],
+  columns = [ColumnResult(name = "ORDER_COUNT")]
+)
+class Member
+
+fun query(em: EntityManger) {
+  val sql = "select m.id, m.name, m.age, i.ORDER_COUNT from ch10member m left join (" +
+    "select im.id, count(*) as ORDER_COUNT from ch10order o, ch10member im where o.member_id=im.id" +
+    ") i on m.id = i.id"
+  val nativeQuery = em.createNativeQuery(sql, "memberWithOrderCount")
+  val resultList = nativeQuery.resultList
+  resultList.forEach {
+    val row = it as Array<*>
+    val member = row[0] as Member
+    val orderCount = row[1] as BigInteger
+    log("member=${member.id}, orderCount=${orderCount}")
+  }
+}
+```
+- 엔티티와 스칼라 값을 함께 조회하여 매핑이 복잡해지면 @SqlResultSetMapping을 정의해서 결과 매핑을 사용해야한다.
+
+```kotlin
+@SqlResultSetMapping(name = "OrderResults",
+  entities = [EntityResult(entityClass = Order::class, fields = [
+    FieldResult(name = "id", column="order_id"),
+    FieldResult(name = "id", column="order_id"),
+  ])],
+  columns = [ColumnResult(name = "item_name")]
+)
+```
+- FieldResult를 사용해서 컬럼명과 필드명 직접 매핑
+- SqlResultSetMapping: name, entities, columns
+- EntityResult: entityClass, fields, discriminatorColumn
+- FieldResult: name, column
+- ColumnResult: name
+
 ## 10.5.2 Named 네이티브 SQL
+```kotlin
+@Entity(name = "ch10Member")
+@SqlResultSetMapping(name = "memberWithOrderCount",
+  entities = [EntityResult(entityClass = Member::class)],
+  columns = [ColumnResult(name = "ORDER_COUNT")]
+)
+@NamedNativeQueries(
+  NamedNativeQuery(name = "Member.memberSQL",
+    query = "select id, name, age from member where age > ?",
+    resultClass = Member::class
+  ),
+  NamedNativeQuery(name = "Member.memberWithOrderCount",
+    query = "select m.id, m.name, m.age, i.ORDER_COUNT from ch10member m left join (" +
+      "select im.id, count(*) as ORDER_COUNT from ch10order o, ch10member im where o.member_id=im.id" +
+      ") i on m.id = i.id",
+    resultClass = Member::class
+  )
+)
+class Member
+
+fun query() {
+  val query:TypedQuery<Member> = em.createNamedQuery("Member.memberSQL", Member::class.java)
+    .setParameter(1, 20)
+}
+```
+- JPQL처럼 네이티브 SQL도 Named 네이티브 SQL로 정적 SQL을 작성할 수 있다.
+- createNamedQuery를 사용하고 TypedQuery를 사용할 수도 있다.
+- resultSetMapping도 사용할 수 있다.
+
 ## 10.5.3 네이티브 SQL XML에 정의
+```xml
+<named-native-query name="Member.memberWithOrderCountXml" result-set-mapping="memberWithOrderCountResultMap">
+  <query><CDATA[
+    SELECT ...
+  ]></query>
+</named-native-query>
+<sql-result-set-mapping name="memberWithOrderCountResultMap">
+    <entity-result entity-class="jpa.Member" />
+    <column-result name="ORDER_COUNT" />
+</sql-result-set-mapping>
+```
+- 순서를 지켜야한다. named-native-query 먼저 정의하고 sql-result-set-mapping를 정의해야한다.
+
 ## 10.5.4 네이티브 SQL 정리
+- 꼭 필요할때만 쓰자.
+
 ## 10.5.5 스토어드 프로시저
+```kotlin
+val spq = em.createStoredProcedureQuery("proc_multiply")
+spq.registerStoredProcedureParameter(1, Integer::class.java, ParameterMode.IN)
+spq.registerStoredProcedureParameter(2, Integer::class.java, ParameterMode.OUT)
+spq.setParameter(1, 100)
+spq.execute()
+
+val out = spq.getOutputParameterValue(2)
+log("out = $out")
+```
+
+```java
+public enum ParameterMode {
+    IN,
+    INOUT,
+    OUT,
+    REF_CURSOR,
+}
+```
+
+### Named 스토어드 프로시저 사용
+```kotlin
+@NamedStoredProcedureQuery(name = "multiply",
+  procedureName = "proc_multiply",
+  parameters = [
+    StoredProcedureParameter(name = "inParam", mode = ParameterMode.IN, type = Int::class),
+    StoredProcedureParameter(name = "outParam", mode = ParameterMode.OUT, type = Int::class)
+  ]
+)
+@Entity
+class Member
+
+fun test() {
+  val spq = em.createNamedStoredProcedureQuery("multiply")
+  spq.setParameter("inParam", 100)
+  spq.execute()
+
+  val out = spq.getOutputParameterValue("outParam")
+  log("out = $out")
+}
+```
 
 # 10.6 객체지향 쿼리 심화
 

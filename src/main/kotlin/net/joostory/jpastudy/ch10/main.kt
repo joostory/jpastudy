@@ -17,7 +17,9 @@ import net.joostory.jpastudy.ch10.QOrder.order
 import net.joostory.jpastudy.ch10.QOrderItem.orderItem
 import net.joostory.jpastudy.log
 import net.joostory.jpastudy.runWithEntityManager
+import java.math.BigInteger
 import javax.persistence.EntityManager
+import javax.persistence.ParameterMode
 import javax.persistence.Query
 import javax.persistence.TypedQuery
 import javax.persistence.criteria.CriteriaQuery
@@ -214,9 +216,59 @@ fun isHelloStart(stringPath: StringPath): BooleanExpression? {
   return stringPath.startsWith("Hello")
 }
 
+private fun queryWithQueryDsl11(em: EntityManager) {
+  val nativeQuery:Query = em.createNativeQuery("select id, name, age from ch10Member where age > ?")
+    .setParameter(1, 20)
+  val list: MutableList<Any?>? = nativeQuery.resultList
+  list?.forEach {
+    val obj = it as Array<*>
+    val id = obj[0] as BigInteger
+    val name = obj[1] as String
+    log("member= $id $name")
+  }
+}
+
+private fun queryWithQueryDsl12(em: EntityManager) {
+  val sql = "select m.id, m.name, m.age, i.ORDER_COUNT from ch10member m left join (" +
+    "select im.id, count(*) as ORDER_COUNT from ch10order o, ch10member im where o.member_id=im.id" +
+    ") i on m.id = i.id"
+  val nativeQuery = em.createNativeQuery(sql, "memberWithOrderCount")
+  val resultList = nativeQuery.resultList
+  resultList.forEach {
+    val row = it as Array<*>
+    val member = row[0] as Member
+    val orderCount = row[1] as BigInteger
+    log("member=${member.id}, orderCount=${orderCount}")
+  }
+}
+
+private fun queryWithQueryDsl13(em: EntityManager) {
+  val query:TypedQuery<Member> = em.createNamedQuery("Member.memberSQL", Member::class.java)
+    .setParameter(1, 20)
+  query.resultList.forEach { member ->
+    log("member = ${member.id}")
+  }
+
+  val spq = em.createStoredProcedureQuery("proc_multiply")
+  spq.registerStoredProcedureParameter(1, Integer::class.java, ParameterMode.IN)
+  spq.registerStoredProcedureParameter(2, Integer::class.java, ParameterMode.OUT)
+  spq.setParameter(1, 100)
+  spq.execute()
+
+  val out = spq.getOutputParameterValue(2)
+  log("out = $out")
+}
+
+private fun saveData(em: EntityManager) {
+  em.persist(Member(name = "회원1", age = 20))
+  em.persist(Member(name = "회원2", age = 21))
+  em.persist(Member(name = "회원3", age = 22))
+}
+
 fun main() {
   println("10장")
   runWithEntityManager { em ->
+    saveData(em)
     queryWithQueryDsl(em)
     queryWithQueryDsl2(em)
     queryWithQueryDsl3(em)
@@ -224,5 +276,8 @@ fun main() {
     queryWithQueryDsl6(em)
     queryWithQueryDsl8(em)
     queryWithQueryDsl9(em)
+    queryWithQueryDsl11(em)
+    queryWithQueryDsl12(em)
+    queryWithQueryDsl13(em)
   }
 }
