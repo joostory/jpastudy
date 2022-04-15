@@ -846,22 +846,303 @@ public abstract class Member_ {
 
 
 # 10.4 QueryDSL
+- Criteria의 단점을 보완하여 대체가능
+
 ## 10.4.1 QueryDSL 설정
+책에는 maven, java의 오래된 버전으로 설명하고 있어서 최신 버전 설정으로 정리
+```
+plugins {
+  kotlin("kapt") version "1.6.20"
+  idea
+}
+
+dependencies {
+  implementation("com.querydsl:querydsl-jpa:5.0.0")
+  kapt("com.querydsl:querydsl-apt:5.0.0:jpa")
+}
+
+// idea에서 자동생성된 파일을 쓸수 있도록 하기 위한 설정
+idea {
+  module {
+    val kaptMain = file("build/generated/source/kapt/main")
+    sourceDirs.add(kaptMain)
+    generatedSourceDirs.add(kaptMain)
+  }
+}
+
+// compileKotlin으로 Q클래스 생성
+// $ gradle clean compileKotlin
+```
+- kotlin에서 APT(annotation processing tool)를 사용하기 위해서 kapt 설정을 한다.
+- querydsl-apt는 kapt를 통해서 설정
+- compileKotlin을 수행하면 `/build/generated/source/kapt/main` 에 q클래스가 생생된다.
+
 ## 10.4.2 시작
+```kotlin
+private fun queryWithQueryDsl(em: EntityManager) {
+  val query = JPAQuery<Member>(em)
+  val qMember = QMember("m")
+  val members:List<Member> = query.from(qMember)
+    .where(qMember.name.eq("회원1"))
+    .orderBy(qMember.name.desc())
+    .fetch()
+  log("${members.size}")
+}
+```
+
+### 기본 Q 생성
+```
+@Generated("com.querydsl.codegen.DefaultEntitySerializer")
+public class QMember extends EntityPathBase<Member> {
+    public static final QMember member = new QMember("member1");
+}
+```
+- 쿼리타입은 사용하기 편리하도록 기본 인스턴스를 보관하고 있다.
+- 같은 엔티티 조회, 서브쿼리 사용을 하기 위해서는 별칭을 직접 지정해서 사용해야한다.
+
+```kotlin
+val qMember:QMember = QMember("m") // 별칭 직접 사용
+val qMember:QMember = QMember.member // 기본 인스턴스
+import net.joostory.jpastudy.ch10.QMember.member // import로 더 간결하게 사용
+```
+
 ## 10.4.3 검색 조건 쿼리
+```kotlin
+private fun queryWithQueryDsl2(em: EntityManager) {
+  val query = JPAQuery<Item>(em)
+  val list:List<Item> = query.from(item)
+    .where(item.name.eq("좋은상품").and(item.price.gt(20000)))
+    .fetch()
+  log("${list.size}")
+}
+
+/*
+select item
+from Item item
+where item.name ?1 and item.price = ?2
+*/
+```
+- where절에는 and, or를 사용할 수 있다.
+- `item.price.between(10000,20000)`
+- `item.name.contains("상품1")`: like '%상품1%'
+- `item.name.startsWith("고급")`: like '고급%'
+
 ## 10.4.4 결과 조회
+- list는 4.1 에서 deprecated (http://querydsl.com/static/querydsl/4.1.0/apidocs/deprecated-list.html) -> fetch
+- uniqueResult -> fetchOne: 하나 이상이면 Exception
+- singleResult -> fetchFirst: 여러개 중 첫번째
+
 ## 10.4.5 페이징과 정렬
+```kotlin
+private fun queryWithQueryDsl3(em: EntityManager) {
+  val query = JPAQuery<Item>(em)
+  val list:List<Item> = query.from(item)
+    .where(item.price.gt(20000))
+    .orderBy(item.price.desc(), item.stockQuantity.asc())
+    .offset(10).limit(20)
+    .fetch()
+  log("${list.size}")
+}
+```
+- 정렬: orderBy, asc, desc
+- 페이징: limit, offset
+
+```kotlin
+private fun queryWithQueryDsl4(em: EntityManager) {
+  val queryModifiers = QueryModifiers(20L, 10L)
+  val query = JPAQuery<Item>(em)
+  val list:List<Item> = query.from(item)
+    .where(item.price.gt(20000))
+    .orderBy(item.price.desc(), item.stockQuantity.asc())
+    .restrict(queryModifiers)
+    .fetch()
+  log("${list.size}")
+}
+```
+- offset, limit 대신 restrict를 사용할 수 있다.
+
+페이징 처리를 위해 listResults(지금은 fetchResults)로 SearchResults(지금은 QueryResults)를 가져와서
+offset, limit, total count를 가져오라는 설명이 있는데 현재는 deprecated된 상태가 모든 방언에서 제대로 구현이 안되기도 했고
+쿼리 생성시 오류가 발생할 여지가 많아 별도로 전체 count를 가져오는 것이 좋다고 한다.
+
 ## 10.4.6 그룹
+```kotlin
+query.from(item)
+  .groupBy(item.price)
+  .having(item.price.gt(1000))
+  .fetch()
+```
+
 ## 10.4.7 조인
+```kotlin
+query.from(order)
+  .join(order.member, member)
+  .leftJoin(orderr.orderItems, orderItem)
+  .fetch()
+
+query.from(order)
+  .leftJoin(order.orderItems, orderItem)
+  .on(orderItem.count.gt(2))
+  .fetch()
+
+query.from(order.member)
+  .innerJoin(order.member, member).fetchJoin() // 페치조인
+  .leftJoin(order.orderItems, orderItem).fetchJoin()
+  .fetch()
+
+query.from(order, member)
+  .where(order.member.eq(member)) // 세타조인
+  .fetch()
+```
+
 ## 10.4.8 서브 쿼리
+```kotlin
+private fun queryWithQueryDsl5(em: EntityManager) {
+  val query = JPAQuery<Item>(em)
+  val itemSub = QItem("itemSub")
+  val list:List<Item> = query.from(item)
+    .where(item.price.eq(JPAExpressions.select(itemSub.price.max()).from(itemSub)))
+    .fetch()
+  log("${list.size}")
+}
+
+private fun queryWithQueryDsl6(em: EntityManager) {
+  val query = JPAQuery<Item>(em)
+  val itemSub = QItem("itemSub")
+  val list:List<Item> = query.from(item)
+    .where(item.`in`(
+      JPAExpressions.select(itemSub)
+        .from(itemSub)
+        .where(item.name.eq(itemSub.name))
+    ))
+    .fetch()
+  log("${list.size}")
+}
+```
+- JPASubQuery -> JPAExpressions: querydsl 4부터 변경되었다.
+- JPAExpressions부터는 fetch를 하지 않는다.
+
 ## 10.4.9 프로젝션과 결과 반환
+```kotlin
+private fun queryWithQueryDsl7(em: EntityManager) {
+  val query = JPAQuery<Tuple>(em)
+  val list:List<Tuple> = query.from(item).select(item.name, item.price).fetch()
+  list.forEach { tuple ->
+    log("${tuple.get(item.name)}")
+    log("${tuple.get(item.price)}")
+  }
+}
+```
+- 여러 필드를 선택하는 경우 Tuple을 사용할 수 있다.
+- 책에서 소개하는 QTuple을 사용하는 방법은 더이상 사용할 수 없다.
+
+### 빈 생성
+```kotlin
+class ItemDTO(
+  var username: String = "",
+  var price: Int = 0
+)
+
+private fun queryWithQueryDsl8(em: EntityManager) {
+  val query = JPAQuery<ItemDTO>(em)
+  val list:MutableList<ItemDTO>? = query.from(item)
+    .select(Projections.bean(ItemDTO::class.java, item.name.`as`("username"), item.price))
+    .fetch()
+  list?.forEach {
+    log("name = ${it.username}")
+    log("price = ${it.price}")
+  }
+}
+```
+- Projections.bean() 메소드는 수정자(setter)로 값을 채운다. ItemDTO를 불변으로 만들면 안된다.
+- 프로퍼티 이름이 다른 경우 as 로 별칭을 만들어준다.
+
+```
+.select(Projections.fields(ItemDTO::class.java, item.name.`as`("username"), item.price))
+.select(Projections.constructor(ItemDTO::class.java, item.name, item.price))
+```
+- Projections.fields는 필드에 직접 접근한다. 불변이라도 동작
+- Projections.constructor는 생성자를 사용한다. 불변에 적합하나 생성자 순서가 중요하다. 별칭은 불필요.
+
+### DISTINCT
+```
+query.distinct().from(item)...
+```
+
 ## 10.4.10 수정, 삭제 배치 쿼리
+```kotlin
+private fun queryWithQueryDsl9(em: EntityManager) {
+  val updateClause = JPAUpdateClause(em, item)
+  val count = updateClause.where(item.id.eq(1L))
+    .set(item.price, item.price.add(1000))
+    .execute()
+
+  val deleteClause = JPADeleteClause(em, item)
+  val resultCount = deleteClause.where(item.id.eq(1L)).execute()
+}
+```
+
 ## 10.4.11 동적 쿼리
+```kotlin
+class SearchParam(
+  var name: String? = null,
+  var price: Int? = null
+)
+
+private fun queryWithQueryDsl10(em: EntityManager) {
+  val params = SearchParam(
+    name = "TEST",
+    price = 100
+  )
+  
+  val builder = BooleanBuilder()
+  if (params.name?.isNotEmpty() == true) {
+    builder.and(item.name.contains(params.name))  
+  }
+  if (params.price != null) {
+    builder.and(item.price.gt(params.price))
+  }
+  val query = JPAQuery<Item>(em)
+  val list:List<Item> = query.from(item)
+    .where(builder).fetch()
+  log("size: ${list.size}")
+}
+```
+- BooleanBuilder로 동적쿼리를 생성할 수 있다.
+
 ## 10.4.12 메소드 위임
-## 10.4.13 QueryDSL 정리
+```kotlin
+@QueryDelegate(Item::class)
+fun isExpensive(item: QItem, price: Int): BooleanExpression? {
+  return item.price.gt(price)
+}
+```
+- 메소드 위임을 사용해 검색조건을 직접 정의할 수 있다.
+- 첫번째 파라미터는 엔티티 쿼리 타입, 나머지는 필요한 파라미터를 정의한다.
+
+```java
+@Generated("com.querydsl.codegen.DefaultEntitySerializer")
+public class QItem extends EntityPathBase<Item> {
+  public BooleanExpression isExpensive(Integer price) {
+    return MainKt.isExpensive(this, price);
+  }
+}
+```
+- 쿼리타입에 메소드가 추가된다.
+
+```kotlin
+query.from(item).where(item.isExpensive(1000)).fetch()
+```
+
+```kotlin
+@QueryDelegate(String::class)
+fun isHelloStart(stringPath: StringPath): BooleanExpression? {
+  return stringPath.startsWith("Hello")
+}
+```
+- String같은 기본 타입에도 정의할 수 있다.
 
 # 10.5 네이티브 SQL
-
 ## 10.5.1 네이티브 SQL 사용
 ## 10.5.2 Named 네이티브 SQL
 ## 10.5.3 네이티브 SQL XML에 정의
