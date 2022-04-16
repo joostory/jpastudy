@@ -1315,5 +1315,92 @@ fun test() {
 # 10.6 객체지향 쿼리 심화
 
 ## 10.6.1 벌크 연산
+```kotlin
+private fun bulkUpdate(em: EntityManager) {
+  log("result= " +
+    em.createQuery("update ch10Item i set i.price = i.price * 1.1 where i.price < :price")
+      .setParameter("price", 10000)
+      .executeUpdate())
+
+  log("result= " +
+    em.createQuery("delete from ch10Item i where i.price < :price")
+      .setParameter("price", 1000)
+      .executeUpdate())
+}
+```
+- 벌크연산은 수정삭제 모두 executeUpdate() 메소드를 사용한다.
+
+### 벌크연산의 주의점
+```kotlin
+private fun bulkUpdate(em: EntityManager) {
+  val sample = JPAQuery<Item>(em).from(item).where(item.price.lt(10000)).fetchFirst()
+  log("before update: ${sample.price}") // 1000
+  log("result= " +
+    em.createQuery("update ch10Item i set i.price = i.price * 1.1 where i.price < :price") // 10000원 이하 10% 증가
+      .setParameter("price", 10000)
+      .executeUpdate())
+  log("after update: ${sample.price}") // 1000
+  em.refresh(sample) // 다시 조회
+  log("after update: ${sample.price}") // 1100
+}
+```
+- 벌크연산은 영속성 컨텍스트를 무시하고 데이터베이스에 직접 쿼리한다.
+- update 수행했지만 여전히 sample의 price는 변하지 않았다.
+- em.refresh()로 다시 조회하거나 영속성 컨텍스트를 초기화하거나 벌크연산을 먼저 수행하여 이 문제를 해결할 수 있다.
+
 ## 10.6.2 영속성 컨텍스트와 JPQL
+
+### 쿼리 후 영속 상태인 것과 아닌 것
+- 조회한 엔티티만 영속성 컨텍스트가 관리한다.
+
+### JPQL로 조회한 엔티티와 영속성 컨텍스트
+```kotlin
+private fun queryEntity(em: EntityManager) {
+  val item2 = em.find(Item::class.java, 2L)
+  val resultList = em.createQuery("select i from ch10Item i", Item::class.java).resultList
+}
+```
+- 이미 영속성 컨텍스트에 있는 엔티티를 조회하면 조회한 정보를 버리고 영속성 컨텍스트에 있는 엔티티를 반환한다. 
+
+![](img02.png)
+![](img03.png)
+
+왜 새로 조회한 정보는 버리고 기존 엔티티를 반환하는 것일까?
+1. 새로운 엔티티를 영속성 컨텍스트에 하나 더 추가한다.
+  - 기본키값을 기준으로 엔티티를 관리하므로 두개를 등록 x
+2. 기존 엔티티를 새로 검색한 엔티티로 대체한다.
+  - 수정 중인 데이터가 사라진다.
+3. 기존 엔티티는 그대로 두고 새로 검색한 엔티티를 버린다.
+  - 영속 상태인 엔티티의 동일성을 보장한다.
+
+### find vs JPQL
+- em.find는 영속성 컨텍스트에서 먼저 찾고 없으면 db에서 찾는다.
+- jpql은 항상 db에서 sql을 실행해서 결과를 조회한다. 영속성 컨텍스트에 엔티티가 이미 존재하면 조회결과를 버린다.
+
 ## 10.6.3 JPQL과 플러시 모드
+- FlushModeType.AUTO: 커밋 또는 쿼리 실행시 플러시 (기본값)
+- FlushModeType.COMMIT: 커밋시에만 플러시
+
+### 쿼리와 플러시 모드
+```kotlin
+private fun queryEntity(em: EntityManager) {
+  em.flushMode = FlushModeType.COMMIT // 커밋시에만 플러시
+  val item2 = em.find(Item::class.java, 2L)
+  item2.price = 20000
+  log("items2 = ${item2.price}")
+  em.flush() // 강제 플러시
+  val resultList = em.createQuery("select i from ch10Item i", Item::class.java)
+    .setFlushMode(FlushModeType.AUTO) // 실행시 플러시모드 설정
+    .resultList
+  resultList.forEach {
+    log("item: id=${it.id} price=${it.price}")
+  }
+}
+```
+- em.flushMode 커밋모드로 설정하면 자동으로 커밋하지 않는다.
+- 만약 쿼리실행 전에 플러시를 하고 싶다면 em.flush()로 강제 플러시하거나 해당 쿼리에서만 플러스모드를 설정한다.
+
+### 플러시 모드와 최적화
+- FlushModeType.COMMIT 모드는 트랜잭션을 커밋할때만 플러시하고 쿼리실행시에는 플러시하지 않는다.
+- 플러시가 너무 자주 일어나는 상황에서 이 모드를 사용하여 플러시 회수를 줄일 수 있다.
+- JDBC로 SQL을 직접호출할때도 em.flush()를 호출해서 동기화하는 것이 안전하다.

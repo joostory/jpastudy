@@ -18,10 +18,7 @@ import net.joostory.jpastudy.ch10.QOrderItem.orderItem
 import net.joostory.jpastudy.log
 import net.joostory.jpastudy.runWithEntityManager
 import java.math.BigInteger
-import javax.persistence.EntityManager
-import javax.persistence.ParameterMode
-import javax.persistence.Query
-import javax.persistence.TypedQuery
+import javax.persistence.*
 import javax.persistence.criteria.CriteriaQuery
 import javax.persistence.criteria.Root
 
@@ -263,21 +260,55 @@ private fun saveData(em: EntityManager) {
   em.persist(Member(name = "회원1", age = 20))
   em.persist(Member(name = "회원2", age = 21))
   em.persist(Member(name = "회원3", age = 22))
+  em.persist(Item(id = 2L, name = "아이템1", price=1000, stockQuantity = 10))
+  em.persist(Item(id = 3L, name = "아이템2", price=2000, stockQuantity = 20))
+  em.persist(Item(id = 4L, name = "아이템3", price=10000, stockQuantity = 30))
+  em.persist(Item(id = 5L, name = "아이템3", price=500, stockQuantity = 20))
+}
+
+private fun bulkUpdate(em: EntityManager) {
+  val sample = JPAQuery<Item>(em).from(item).where(item.price.lt(10000)).fetchFirst()
+
+  log("before update: item= ${sample.id} ${sample.price}")
+
+  log("result= " +
+    em.createQuery("update ch10Item i set i.price = i.price * 1.1 where i.price < :price")
+      .setParameter("price", 10000)
+      .executeUpdate())
+
+  log("after update: item= ${sample.id} ${sample.price}")
+  em.refresh(sample)
+  log("after update: item= ${sample.id} ${sample.price}")
+}
+
+private fun queryEntity(em: EntityManager) {
+  em.flushMode = FlushModeType.COMMIT
+  val item2 = em.find(Item::class.java, 2L)
+  item2.price = 20000
+  log("items2 = ${item2.price}")
+  val resultList = em.createQuery("select i from ch10Item i", Item::class.java)
+    .setFlushMode(FlushModeType.AUTO)
+    .resultList
+  resultList.forEach {
+    log("item: id=${it.id} price=${it.price}")
+  }
 }
 
 fun main() {
   println("10장")
   runWithEntityManager { em ->
     saveData(em)
-    queryWithQueryDsl(em)
-    queryWithQueryDsl2(em)
-    queryWithQueryDsl3(em)
-    queryWithQueryDsl5(em)
-    queryWithQueryDsl6(em)
-    queryWithQueryDsl8(em)
-    queryWithQueryDsl9(em)
-    queryWithQueryDsl11(em)
-    queryWithQueryDsl12(em)
-    queryWithQueryDsl13(em)
+//    queryWithQueryDsl(em)
+//    queryWithQueryDsl2(em)
+//    queryWithQueryDsl3(em)
+//    queryWithQueryDsl5(em)
+//    queryWithQueryDsl6(em)
+//    queryWithQueryDsl8(em)
+//    queryWithQueryDsl9(em)
+//    queryWithQueryDsl11(em)
+//    queryWithQueryDsl12(em)
+//    bulkUpdate(em)
+    em.flush()
+    queryEntity(em)
   }
 }
