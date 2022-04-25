@@ -120,7 +120,7 @@ interface MemberRepository: JpaRepository<Member, Long> {
 ```kotlin
 @Entity
 @NamedQuery(
-    name = "Member.findByName",
+    name = "Member.findByUsername",
     query = "select m from Member m where m.name = :name"
 )
 class Member
