@@ -19,6 +19,10 @@
     <class>net.joostory.jpastudy.ch10.Item</class>
     <class>net.joostory.jpastudy.ch10.Order</class>
     <class>net.joostory.jpastudy.ch10.OrderItem</class>
+    <class>net.joostory.jpastudy.ch14.Team</class>
+    <class>net.joostory.jpastudy.ch14.Member</class>
+    <class>net.joostory.jpastudy.ch14.Board</class>
+    <class>net.joostory.jpastudy.ch14.Comment</class>
 		<properties>
 
 			<!-- 필수 속성 -->
